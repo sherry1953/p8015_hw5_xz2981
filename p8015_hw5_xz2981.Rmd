@@ -1,0 +1,162 @@
+---
+title: "p8015_hw5_xz2981"
+author: "Xinyan Zhou"
+date: "11/17/2021"
+output: github_document
+---
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(readxl)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+# Problem 2
+
+```{r}
+list_id <- list.files('./data')
+
+list_df =
+  tibble(
+    id = list_id
+  )
+```
+
+```{r}
+data <-
+  read_csv(file = "./data/con_01.csv") %>%
+  mutate(id = "con_01.csv")
+
+data_add <-
+  left_join(list_df, data, by = "id")
+```
+
+```{r}
+add = function(x) {
+  
+  path <- paste0("./data/", x)
+  
+  data <-
+    read_csv(file = path) %>%
+    mutate(id = x)
+  
+  return(data)
+  
+}
+```
+
+```{r}
+data_temp =
+  tibble(
+    data = map(list_df,add)
+  )
+
+data_new <-
+  data_temp %>%
+  unnest(data) %>%
+  select(id,everything()) %>%
+  separate(id,c("arm","other"),sep = "_") %>%
+  separate(other,c("id","other"),sep = "[.]") %>%
+  select(-other) %>%
+  pivot_longer( 
+    week_1:week_8,
+    names_to = "weeks", 
+    names_prefix = "week_",
+    values_to = "value")
+
+data_new %>%
+  filter(arm == "con") %>%
+  ggplot(aes(x = weeks, y = value, group = id, color = id)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    title = "Average value over time within a state",
+    x = "Year",
+    y = "Average value",
+    caption = "Data from BRFSS"
+  ) +
+  viridis::scale_color_viridis(
+    name = "arm", 
+    discrete = TRUE
+  ) +
+  theme_minimal()
+
+data_new %>%
+  filter(arm == "exp") %>%
+  ggplot(aes(x = weeks, y = value, group = id, color = id)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    title = "Average value over time within a state",
+    x = "Year",
+    y = "Average value",
+    caption = "Data from BRFSS"
+  ) +
+  viridis::scale_color_viridis(
+    name = "arm", 
+    discrete = TRUE
+  ) +
+  theme_minimal()
+```
+
+# Problem 3
+
+```{r}
+set.seed(10)
+
+iris_with_missing = iris %>% 
+  map_df(~replace(.x, sample(1:150, 20), NA)) %>%
+  mutate(Species = as.character(Species)) %>%
+  janitor::clean_names()
+```
+
+```{r}
+try <- 
+iris_with_missing %>%
+  mutate(species = if_else(is.na(species), "virginica", species))
+
+sepal_mean <- mean(pull(iris_with_missing, sepal_length),na.rm = TRUE)
+```
+
+```{r}
+fill_in_missing = function(x) {
+  
+  if (is.na(x)) {
+  
+    if (is.numeric(x)) {
+      x = sepal_mean
+    }
+  
+    if (is.character(x)) {
+      x = "virginica"
+    }
+  
+  }
+  
+  return(x)
+
+}
+iris_filled <-
+  iris_with_missing %>%
+  mutate(sepal_length = map(pull(iris_with_missing,sepal_length),fill_in_missing),
+         species = map(pull(iris_with_missing,species),fill_in_missing))
+
+```
+
+
