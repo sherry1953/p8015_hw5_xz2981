@@ -8,7 +8,6 @@ output: github_document
 ```{r}
 library(tidyverse)
 library(rvest)
-library(readxl)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -27,8 +26,77 @@ scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
 ```
 
-# Problem 2
 
+## Problem 1
+
+Read in the data.
+
+```{r}
+homicide_df = 
+  read_csv("homicide_data/homicide-data.csv") %>% 
+  mutate(
+    city_state = str_c(city, state, sep = "_"),
+    resolved = case_when(
+      disposition == "Closed without arrest" ~ "unsolved",
+      disposition == "Open/No arrest"        ~ "unsolved",
+      disposition == "Closed by arrest"      ~ "solved",
+    )
+  ) %>% 
+  select(city_state, resolved) %>% 
+  filter(city_state != "Tulsa_AL")
+```
+
+
+Let's look at this a bit
+
+```{r}
+aggregate_df = 
+  homicide_df %>% 
+  group_by(city_state) %>% 
+  summarize(
+    hom_total = n(),
+    hom_unsolved = sum(resolved == "unsolved")
+  )
+```
+
+Can I do a prop test for a single city?
+
+```{r}
+prop.test(
+  aggregate_df %>% filter(city_state == "Baltimore_MD") %>% pull(hom_unsolved), 
+  aggregate_df %>% filter(city_state == "Baltimore_MD") %>% pull(hom_total)) %>% 
+  broom::tidy()
+```
+
+Try to iterate ........
+
+```{r}
+results_df = 
+  aggregate_df %>% 
+  mutate(
+    prop_tests = map2(.x = hom_unsolved, .y = hom_total, ~prop.test(x = .x, n = .y)),
+    tidy_tests = map(.x = prop_tests, ~broom::tidy(.x))
+  ) %>% 
+  select(-prop_tests) %>% 
+  unnest(tidy_tests) %>% 
+  select(city_state, estimate, conf.low, conf.high)
+```
+
+
+
+```{r}
+results_df %>% 
+  mutate(city_state = fct_reorder(city_state, estimate)) %>% 
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point() + 
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+
+## Problem 2
+
+Start with a dataframe containing all file names
 ```{r}
 list_id <- list.files('./data')
 
@@ -38,15 +106,7 @@ list_df =
   )
 ```
 
-```{r}
-data <-
-  read_csv(file = "./data/con_01.csv") %>%
-  mutate(id = "con_01.csv")
-
-data_add <-
-  left_join(list_df, data, by = "id")
-```
-
+Iterate over file names and read in data for each subject using purrr::map and saving the result as a new variable in the dataframe
 ```{r}
 add = function(x) {
   
@@ -59,14 +119,15 @@ add = function(x) {
   return(data)
   
 }
-```
 
-```{r}
 data_temp =
   tibble(
     data = map(list_df,add)
   )
+```
 
+Tidy the result; manipulate file names to include control arm and subject ID, make sure weekly observations are “tidy”, and do any other tidying that’s necessary
+```{r}
 data_new <-
   data_temp %>%
   unnest(data) %>%
@@ -80,42 +141,29 @@ data_new <-
     names_prefix = "week_",
     values_to = "value")
 
-data_new %>%
-  filter(arm == "con") %>%
-  ggplot(aes(x = weeks, y = value, group = id, color = id)) +
-  geom_point() +
-  geom_line() +
-  labs(
-    title = "Average value over time within a state",
-    x = "Year",
-    y = "Average value",
-    caption = "Data from BRFSS"
-  ) +
-  viridis::scale_color_viridis(
-    name = "arm", 
-    discrete = TRUE
-  ) +
-  theme_minimal()
+data_new
+```
 
+Make a spaghetti plot showing observations on each subject over time, and comment on differences between groups
+```{r}
 data_new %>%
-  filter(arm == "exp") %>%
-  ggplot(aes(x = weeks, y = value, group = id, color = id)) +
-  geom_point() +
+  ggplot(aes(x = weeks, y = value, group = id, color = arm)) +
   geom_line() +
+  facet_grid(~arm) +
   labs(
-    title = "Average value over time within a state",
-    x = "Year",
-    y = "Average value",
-    caption = "Data from BRFSS"
-  ) +
-  viridis::scale_color_viridis(
-    name = "arm", 
-    discrete = TRUE
+    title = "Treatment value over time",
+    x = "Week(s)",
+    y = "Treatment value",
+    caption = "Data from a longitudinal study"
   ) +
   theme_minimal()
 ```
 
-# Problem 3
+In the control arm, we cannot find a clear pattern for the treatment value over time. The value for each individual seems to fluctuate randomly as the time changes.
+In the experimental arm, we can find a clear pattern for the treatment value over time:
+for each individual, the observed value increases as time goes by.
+
+## Problem 3
 
 ```{r}
 set.seed(10)
@@ -126,37 +174,28 @@ iris_with_missing = iris %>%
   janitor::clean_names()
 ```
 
-```{r}
-try <- 
-iris_with_missing %>%
-  mutate(species = if_else(is.na(species), "virginica", species))
-
-sepal_mean <- mean(pull(iris_with_missing, sepal_length),na.rm = TRUE)
-```
+Write a function that takes a vector as an argument
 
 ```{r}
-fill_in_missing = function(x) {
+fill_missing = function(x) {
   
-  if (is.na(x)) {
-  
-    if (is.numeric(x)) {
-      x = sepal_mean
+  if (is.numeric(x)) {
+    x = replace(x, which(is.na(x)), mean(x, na.rm = TRUE))
     }
   
-    if (is.character(x)) {
-      x = "virginica"
-    }
-  
-  }
-  
+  else {x = ifelse(is.na(x), "virginica", x)}
+
   return(x)
 
 }
-iris_filled <-
-  iris_with_missing %>%
-  mutate(sepal_length = map(pull(iris_with_missing,sepal_length),fill_in_missing),
-         species = map(pull(iris_with_missing,species),fill_in_missing))
-
 ```
 
+Apply function  to the columns of iris_with_missing using a map statement
 
+```{r}
+output = map(iris_with_missing, fill_missing)
+
+iris_no_missing = bind_rows(output)
+
+iris_no_missing
+```
